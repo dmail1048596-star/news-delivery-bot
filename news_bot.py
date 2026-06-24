@@ -43,7 +43,7 @@ def filter_and_summarize(articles):
         sys.exit(1)
     
     genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-pro")
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
     # ニュースのテキストリストを作成
     news_list_text = ""
