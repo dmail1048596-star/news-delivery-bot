@@ -18,13 +18,12 @@ RSS_FEEDS = [
 OUTPUT_DIR = "public"
 
 def fetch_news():
-    """RSSフィードからニュース記事を収集する"""
     print("ニュースを収集しています...")
     articles = []
     for feed_info in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_info["url"])
-            for entry in feed.entries[:10]:  # 各フィード最新10件
+            for entry in feed.entries[:10]:
                 articles.append({
                     "title": entry.title,
                     "link": entry.link,
@@ -36,18 +35,28 @@ def fetch_news():
     return articles
 
 def filter_and_summarize(articles):
-    """Googleの新しいSDKを使用して、興味のあるニュースを厳選・要約する"""
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
         print("エラー: GEMINI_API_KEY が設定されていません。")
         sys.exit(1)
     
-    # 新しいSDKでのクライアント初期化
     try:
         client = genai.Client(api_key=gemini_key)
     except Exception as e:
         print(f"Geminiクライアント初期化エラー: {e}")
         sys.exit(1)
+
+    # --------------------------------------------------
+    # 【デバッグ】利用可能なモデルをログに出力します
+    print("=== [デバッグ] 利用可能なモデル一覧の取得をテストします ===")
+    try:
+        models = client.models.list()
+        for m in models:
+            print(f"利用可能: {m.name}")
+    except Exception as e:
+        print(f"★モデル一覧の取得エラー: {e}")
+    print("==========================================================")
+    # --------------------------------------------------
 
     # ニュースのテキストリストを作成
     news_list_text = ""
@@ -55,33 +64,17 @@ def filter_and_summarize(articles):
         news_list_text += f"No.{i+1}\nタイトル: {art['title']}\n概要: {art['summary']}\nリンク: {art['link']}\n\n"
 
     prompt = f"""
-あなたは優秀なニュース編集者です。
 今日収集したニュースの一覧から、以下の【私の興味のあるキーワード】に合致する重要なニュースを最大3件〜5件厳選し、
 それぞれについて「タイトル」と「100〜150文字程度のわかりやすい要約（日本語）」、そして元のニュースリンク（URL）を提示してください。
-※音声で読み上げるため、タイトルと要約文は聞き取りやすい自然な日本語の話し言葉でまとめてください。
-
 【私の興味のあるキーワード】
 - {', '.join(KEYWORDS)}
 
 ニュース一覧：
 {news_list_text}
-
-出力フォーマット（プレーンテキストで、マークダウンの太字「**」などは使用しないでください。）：
-
-【朝のニュース要約】
-
-■ [タイトル1]
-[要約文1]
-リンク: [URL1]
-
-■ [タイトル2]
-[要約文2]
-リンク: [URL2]
 """
 
     print("Gemini APIで要約を生成中...")
     try:
-        # 新しいSDKの呼び出し方式
         response = client.models.generate_content(
             model="gemini-1.5-flash",
             contents=prompt
@@ -92,7 +85,6 @@ def filter_and_summarize(articles):
         sys.exit(1)
 
 def generate_audio(text, output_dir):
-    """要約テキストから音声ファイル（MP3）を生成する"""
     print("音声ファイルを生成しています...")
     lines = text.split("\n")
     read_lines = []
@@ -119,7 +111,6 @@ def generate_audio(text, output_dir):
     return output_filename, duration_ms
 
 def save_summary(text, output_dir):
-    """要約テキストをファイルに保存する"""
     os.makedirs(output_dir, exist_ok=True)
     summary_file = os.path.join(output_dir, "summary.txt")
     with open(summary_file, "w", encoding="utf-8") as f:
@@ -127,7 +118,6 @@ def save_summary(text, output_dir):
     print(f"要約テキストを保存しました: {summary_file}")
 
 def send_to_line(text, audio_url, duration_ms):
-    """LINE Messaging API経由でメッセージと音声を送信する"""
     line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
     line_user_id = os.getenv("LINE_USER_ID")
 
@@ -187,7 +177,7 @@ def run_send():
     duration_file = os.path.join(OUTPUT_DIR, "duration.txt")
 
     if not os.path.exists(summary_file) or not os.path.exists(duration_file):
-        print("エラー: 送信に必要なファイルが見つかりません。先に --generate を実行してください。")
+        print("エラー: 送信に必要なファイルが見つかりません。")
         sys.exit(1)
 
     with open(summary_file, "r", encoding="utf-8") as f:
@@ -202,7 +192,6 @@ def run_send():
         audio_url = f"https://{owner.lower()}.github.io/{repo.lower()}/news.mp3"
     else:
         audio_url = "https://example.com/news.mp3"
-        print("警告: GITHUB_REPOSITORY が設定されていません。")
 
     send_to_line(summary, audio_url, duration_ms)
 
