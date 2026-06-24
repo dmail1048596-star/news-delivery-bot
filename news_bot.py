@@ -3,7 +3,7 @@ import sys
 import argparse
 import feedparser
 import requests
-import google.generativeai as genai
+from google import genai
 from gtts import gTTS
 from mutagen.mp3 import MP3
 
@@ -36,14 +36,18 @@ def fetch_news():
     return articles
 
 def filter_and_summarize(articles):
-    """Gemini APIを使用して、興味のあるニュースを厳選・要約する"""
+    """Googleの新しいSDKを使用して、興味のあるニュースを厳選・要約する"""
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
         print("エラー: GEMINI_API_KEY が設定されていません。")
         sys.exit(1)
     
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    # 新しいSDKでのクライアント初期化
+    try:
+        client = genai.Client(api_key=gemini_key)
+    except Exception as e:
+        print(f"Geminiクライアント初期化エラー: {e}")
+        sys.exit(1)
 
     # ニュースのテキストリストを作成
     news_list_text = ""
@@ -77,7 +81,11 @@ def filter_and_summarize(articles):
 
     print("Gemini APIで要約を生成中...")
     try:
-        response = model.generate_content(prompt)
+        # 新しいSDKの呼び出し方式
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
         return response.text
     except Exception as e:
         print(f"Gemini API実行エラー: {e}")
@@ -86,7 +94,6 @@ def filter_and_summarize(articles):
 def generate_audio(text, output_dir):
     """要約テキストから音声ファイル（MP3）を生成する"""
     print("音声ファイルを生成しています...")
-    # 音声読み上げ用に、リンク部分などを除外したテキストを作る
     lines = text.split("\n")
     read_lines = []
     for line in lines:
@@ -95,26 +102,21 @@ def generate_audio(text, output_dir):
         read_lines.append(line)
     read_text = "\n".join(read_lines)
 
-    # 出力先フォルダの作成
     os.makedirs(output_dir, exist_ok=True)
     output_filename = os.path.join(output_dir, "news.mp3")
 
-    # gTTSで音声合成
     tts = gTTS(text=read_text, lang='ja')
     tts.save(output_filename)
     
-    # 再生時間をミリ秒単位で取得
     audio = MP3(output_filename)
     duration_ms = int(audio.info.length * 1000)
-    print(f"音声生成完了: {output_filename} (長さ: {duration_ms / 1000} 秒)")
-    return duration_filename_save_info(output_dir, duration_ms)
-
-def duration_filename_save_info(output_dir, duration_ms):
-    # 再生時間をファイルに保存
+    
     duration_file = os.path.join(output_dir, "duration.txt")
     with open(duration_file, "w", encoding="utf-8") as f:
         f.write(str(duration_ms))
-    return "news.mp3", duration_ms
+        
+    print(f"音声生成完了: {output_filename} (長さ: {duration_ms / 1000} 秒)")
+    return output_filename, duration_ms
 
 def save_summary(text, output_dir):
     """要約テキストをファイルに保存する"""
@@ -166,7 +168,6 @@ def send_to_line(text, audio_url, duration_ms):
         print(f"LINE通信エラー: {e}")
 
 def run_generate():
-    """生成フェーズ"""
     articles = fetch_news()
     if not articles:
         print("ニュース記事が収集できませんでした。")
@@ -182,12 +183,11 @@ def run_generate():
     print("生成フェーズ完了。")
 
 def run_send():
-    """送信フェーズ"""
     summary_file = os.path.join(OUTPUT_DIR, "summary.txt")
     duration_file = os.path.join(OUTPUT_DIR, "duration.txt")
 
     if not os.path.exists(summary_file) or not os.path.exists(duration_file):
-        print("エラー: 送信に必要なファイル（summary.txt または duration.txt）が見つかりません。先に --generate を実行してください。")
+        print("エラー: 送信に必要なファイルが見つかりません。先に --generate を実行してください。")
         sys.exit(1)
 
     with open(summary_file, "r", encoding="utf-8") as f:
@@ -196,14 +196,13 @@ def run_send():
     with open(duration_file, "r", encoding="utf-8") as f:
         duration_ms = int(f.read().strip())
 
-    # LINE送信用の音声URL構築
-    github_repository = os.getenv("GITHUB_REPOSITORY")  # 例: "username/repository"
+    github_repository = os.getenv("GITHUB_REPOSITORY")
     if github_repository:
         owner, repo = github_repository.split("/")
         audio_url = f"https://{owner.lower()}.github.io/{repo.lower()}/news.mp3"
     else:
         audio_url = "https://example.com/news.mp3"
-        print("警告: GITHUB_REPOSITORY が設定されていません。ローカルテスト用URLを使用します。")
+        print("警告: GITHUB_REPOSITORY が設定されていません。")
 
     send_to_line(summary, audio_url, duration_ms)
 
