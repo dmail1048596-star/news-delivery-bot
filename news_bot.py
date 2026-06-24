@@ -1,11 +1,14 @@
 import os
 import sys
 import argparse
+import shutil
 import feedparser
 import requests
 from google import genai
 from gtts import gTTS
 from mutagen.mp3 import MP3
+from pydub import AudioSegment
+from pydub.effects import speedup
 
 # 定数・設定
 KEYWORDS = ["生成AI", "投資", "経済", "一般教養ニュース", "宇宙開発", "ファッションとインテリア"]
@@ -42,7 +45,6 @@ def filter_and_summarize(articles):
         print("エラー: GEMINI_API_KEY が設定されていません。")
         sys.exit(1)
     
-    # 新しいSDKでのクライアント初期化
     try:
         client = genai.Client(api_key=gemini_key)
     except Exception as e:
@@ -81,7 +83,6 @@ def filter_and_summarize(articles):
 
     print("Gemini APIで要約を生成中...")
     try:
-        # ご利用可能な最新の gemini-2.5-flash モデルを指定
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
@@ -92,7 +93,7 @@ def filter_and_summarize(articles):
         sys.exit(1)
 
 def generate_audio(text, output_dir):
-    """要約テキストから音声ファイル（MP3）を生成する"""
+    """要約テキストから音声ファイル（MP3）を生成し、1.2倍速に変換する"""
     print("音声ファイルを生成しています...")
     lines = text.split("\n")
     read_lines = []
@@ -103,11 +104,29 @@ def generate_audio(text, output_dir):
     read_text = "\n".join(read_lines)
 
     os.makedirs(output_dir, exist_ok=True)
-    output_filename = os.path.join(output_dir, "news.mp3")
-
-    tts = gTTS(text=read_text, lang='ja')
-    tts.save(output_filename)
     
+    # gTTSで一度普通の一時ファイルを作成
+    tmp_filename = os.path.join(output_dir, "tmp_news.mp3")
+    tts = gTTS(text=read_text, lang='ja')
+    tts.save(tmp_filename)
+    
+    # pydubを使用して1.2倍速（ピッチ維持）に変換
+    print("音声の速度を1.2倍に変換しています...")
+    output_filename = os.path.join(output_dir, "news.mp3")
+    try:
+        sound = AudioSegment.from_mp3(tmp_filename)
+        # speedupで1.2倍速にする（ピッチは変わらない）
+        fast_sound = speedup(sound, playback_speed=1.2)
+        fast_sound.export(output_filename, format="mp3")
+    except Exception as e:
+        print(f"速度変換エラー: {e}。通常速度のファイルを代替出力します。")
+        shutil.copyfile(tmp_filename, output_filename)
+    finally:
+        # 一時ファイルを削除
+        if os.path.exists(tmp_filename):
+            os.remove(tmp_filename)
+    
+    # 再生時間を取得
     audio = MP3(output_filename)
     duration_ms = int(audio.info.length * 1000)
     
